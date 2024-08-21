@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import ast
 import json
 import logging
 import asyncio
@@ -83,6 +84,30 @@ class RedisWatcher:
                     f"{field_index} {' '.join(params)}",
                 )
                 return await self.pub_client.publish(self.options.channel, msg.marshal_binary())
+
+        return self.loop.create_task(self.log_record(func))
+
+    def update_for_add_policies(self, sec: str, ptype: str, *params: str):
+        async def func():
+            async with self.mutex:
+                msg = MSG(
+                    "UpdateForAddPolicies", self.options.local_ID, sec, ptype, params
+                )
+                return await self.pub_client.publish(
+                    self.options.channel, msg.marshal_binary()
+                )
+
+        return self.loop.create_task(self.log_record(func))
+
+    def update_for_remove_policies(self, sec: str, ptype: str, *params: str):
+        async def func():
+            async with self.mutex:
+                msg = MSG(
+                    "UpdateForRemovePolicies", self.options.local_ID, sec, ptype, params
+                )
+                return await self.pub_client.publish(
+                    self.options.channel, msg.marshal_binary()
+                )
 
         return self.loop.create_task(self.log_record(func))
 
@@ -184,3 +209,60 @@ async def new_publish_watcher(option: WatcherOptions):
     await w.init_config(option)
     w.close = False
     return w
+
+
+async def handle_event(enforce, event):
+    """
+    Handle the event from the watcher
+    :param enforce: casbin.enforcer.Enforcer
+    :param event: str
+    :return: None
+    """
+    # Parse the event
+
+    parsed_dict = ast.literal_eval(event)
+    data = ast.literal_eval(parsed_dict.get("data").decode("utf-8"))
+    method = data.get("method")
+    sec = data.get("sec")
+    ptype = data.get("ptype")
+    params = data.get("params", [])
+
+    # Handler dict
+    handlers = {
+        "UpdateForSavePolicy": enforce.save_policy,
+        "UpdateForAddPolicy": enforce.model.add_policy,
+        "UpdateForAddPolicies": enforce.model.add_policies,
+        "UpdateForRemovePolicy": enforce.model.remove_policy,
+        "UpdateForRemovePolicies": enforce.model.remove_policies,
+        "UpdateForRemoveFilteredPolicy": enforce.model.remove_filtered_policy,
+        "Update": enforce.load_policy,  # default handler
+    }
+    # Apply the update to the enforcer
+    default_handler = handlers.get("Update")
+    handler = handlers.get(method, default_handler)
+    if not method in handlers:
+        print(f"Unknown method: {method}")
+    if handler == default_handler:  # pylint: disable=no-else-return
+        handler()
+        print("Reloaded policy from casbin database")
+        return
+    elif method == "UpdateForSavePolicy":
+        await handler()
+        print("Saved policy to casbin database")
+        return
+    else:
+        for param in params:
+            if method in set(
+                ["UpdateForRemoveFilteredPolicy"]
+            ):  # field_index, *field_values
+                field_index, *field_values = param.split(" ")
+                await handler(ptype, int(field_index), *field_values)
+                print(f"{handler.__name__}, {field_index}, {field_values}")
+            else:  # ptype, *param
+                if len(param) == 1 and isinstance(params[0], list):
+                    str_slice = param[0]
+                    await handler("p", ptype, str_slice)
+                else:
+                    await handler("p", ptype, list(param))
+                print(f"{handler.__name__}, {ptype}, {param}")
+        print(f"{method}: sec={sec}, ptype={ptype}, params={params}")

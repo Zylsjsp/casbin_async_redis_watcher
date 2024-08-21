@@ -12,22 +12,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from dataclasses import dataclass
 import uuid
 
 
+@dataclass
 class WatcherOptions:
-    password = None
-    host = "localhost"
-    port = "6379"
-    db = 0
-    use_pool = True
-    ssl = False
+    password: str = None
+    host: str = "localhost"
+    port: str = "6379"
+    db: int = 0
+    use_pool: bool = True
+    ssl: bool = False
     sub_client = None
     pub_client = None
-    channel = None
+    channel: str = None
     ignore_self = None
-    local_ID = None
-    optional_update_callback = None
+    local_ID: str = None
+    optional_update_callback: callable = None
 
     def init_config(self):
 
