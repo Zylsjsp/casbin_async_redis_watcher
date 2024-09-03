@@ -24,6 +24,7 @@ from typing import Union, Awaitable
 
 from casbin_async_redis_watcher.options import WatcherOptions
 
+logger = logging.getLogger(__name__)
 
 class RedisWatcher:
     def __init__(self):
@@ -241,14 +242,14 @@ async def handle_event(enforce, event):
     default_handler = handlers.get("Update")
     handler = handlers.get(method, default_handler)
     if not method in handlers:
-        print(f"Unknown method: {method}")
+        logger.warning(f"Unknown method: {method}")
     if handler == default_handler:  # pylint: disable=no-else-return
         handler()
-        print("Reloaded policy from casbin database")
+        logger.info("Reloaded policy from casbin database")
         return
     elif method == "UpdateForSavePolicy":
         await handler()
-        print("Saved policy to casbin database")
+        logger.info("Saved policy to casbin database")
         return
     else:
         for param in params:
@@ -257,12 +258,12 @@ async def handle_event(enforce, event):
             ):  # field_index, *field_values
                 field_index, *field_values = param.split(" ")
                 await handler(ptype, int(field_index), *field_values)
-                print(f"{handler.__name__}, {field_index}, {field_values}")
+                logger.debug(f"{handler.__name__}, {field_index}, {field_values}")
             else:  # ptype, *param
                 if len(param) == 1 and isinstance(params[0], list):
                     str_slice = param[0]
-                    await handler("p", ptype, str_slice)
+                    await handler(sec, ptype, str_slice)
                 else:
-                    await handler("p", ptype, list(param))
-                print(f"{handler.__name__}, {ptype}, {param}")
-        print(f"{method}: sec={sec}, ptype={ptype}, params={params}")
+                    await handler(sec, ptype, list(param))
+                logger.debug(f"{handler.__name__}, {ptype}, {param}")
+        logger.info(f"{method}: sec={sec}, ptype={ptype}, params={params}")
